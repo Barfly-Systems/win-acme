@@ -8,7 +8,7 @@ namespace PKISharp.WACS.Plugins.Interfaces
 {
     public interface ICsrPlugin : IPlugin
     {
-        Task<AsymmetricCipherKeyPair> GetKeys();
+        Task<AsymmetricCipherKeyPair?> GetKeys(string cacheFile);
         Task<Pkcs10CertificationRequest> GenerateCsr(string cacheFile, string commonName, List<string> identifiers);
         Task<X509Certificate2> PostProcess(X509Certificate2 certificate);
     }

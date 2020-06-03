@@ -127,6 +127,10 @@ namespace PKISharp.WACS.Clients.Acme
             {
                 var content = File.ReadAllText(fi.FullName);
                 var order = JsonConvert.DeserializeObject<OrderDetails>(content);
+                if (!_certificateService.HasCachedKey(cacheKey))
+                {
+                    _log.Warning("Unable to read private key for cached order");
+                }
                 return order;
             } 
             catch (Exception ex)

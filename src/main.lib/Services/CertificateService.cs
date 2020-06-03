@@ -124,7 +124,7 @@ namespace PKISharp.WACS.Services
         /// <param name="postfix"></param>
         /// <param name="prefix"></param>
         /// <returns></returns>
-        private string GetPath(Renewal renewal, string postfix, string prefix = "") => Path.Combine(_cache.FullName, $"{prefix}{renewal.Id}{postfix}");
+        private string GetPath(Renewal? renewal, string postfix, string prefix = "") => Path.Combine(_cache.FullName, $"{prefix}{renewal?.Id ?? ""}{postfix}");
 
         /// <summary>
         /// Read from the disk cache
@@ -303,6 +303,17 @@ namespace PKISharp.WACS.Services
                 }
             }
 
+            // Backwards compatible with existing keys, which are not split per order yet.
+            var keyFile = new FileInfo(GetPath(order.Renewal, $".keys"));
+            if (!keyFile.Exists)
+            {
+                keyFile = new FileInfo(GetPath(order.Renewal, $"-{cacheKey}.keys"));
+            }
+            if (!keyFile.Exists)
+            {
+                keyFile = new FileInfo(GetPath(null, $"{cacheKey}.keys"));
+            }
+
             if (order.Details.Payload.Status != AcmeClient.OrderValid)
             {
                 // Clear cache and write new cert
@@ -314,21 +325,23 @@ namespace PKISharp.WACS.Services
                     {
                         throw new InvalidOperationException("Missing csrPlugin");
                     }
-                    // Backwards compatible with existing keys, which are not split per order yet.
-                    var keyFile = new FileInfo(GetPath(order.Renewal, $".keys"));
-                    if (!keyFile.Exists)
-                    {
-                        keyFile = new FileInfo(GetPath(order.Renewal, $"-{cacheKey}.keys"));
-                    }
                     var csr = await csrPlugin.GenerateCsr(keyFile.FullName, commonNameAscii, identifiers);
-                    var keySet = await csrPlugin.GetKeys();
+                    var keySet = await csrPlugin.GetKeys(keyFile.FullName);
+                    if (keySet == null)
+                    {
+                        throw new InvalidOperationException("Missing private key");
+                    }
                     order.Target.CsrBytes = csr.GetDerEncoded();
                     order.Target.PrivateKey = keySet.Private;
-                    var csrPath = GetPath(order.Renewal, $"-{cacheKey}{CsrPostFix}");
-                    File.WriteAllText(csrPath, _pemService.GetPem("CERTIFICATE REQUEST", order.Target.CsrBytes));
-                    _log.Debug("CSR stored at {path} in certificate cache folder {folder}", Path.GetFileName(csrPath), Path.GetDirectoryName(csrPath));
-
                 }
+                else if (order.Target.PrivateKey != null)
+                {
+                    File.WriteAllText(keyFile.FullName, _pemService.GetPem(order.Target.PrivateKey));
+                }
+
+                var csrPath = GetPath(order.Renewal, $"-{cacheKey}{CsrPostFix}");
+                File.WriteAllText(csrPath, _pemService.GetPem("CERTIFICATE REQUEST", order.Target.CsrBytes));
+                _log.Debug("CSR stored at {path} in certificate cache folder {folder}", Path.GetFileName(csrPath), Path.GetDirectoryName(csrPath));
 
                 _log.Verbose("Submitting CSR");
                 order.Details = await _client.SubmitCsr(order.Details, order.Target.CsrBytes);
@@ -337,6 +350,20 @@ namespace PKISharp.WACS.Services
                     _log.Error("Unexpected order status {status}", order.Details.Payload.Status);
                     throw new Exception($"Unable to complete order");
                 }
+            } 
+            else if (order.Target.CsrBytes == null)
+            {
+                // We are reusing this order, private keys should be available
+                if (csrPlugin == null)
+                {
+                    throw new InvalidOperationException("Missing csrPlugin");
+                }
+                var keySet = await csrPlugin.GetKeys(keyFile.FullName);
+                if (keySet == null)
+                {
+                    throw new InvalidOperationException("Missing private key");
+                }
+                order.Target.PrivateKey = keySet.Private;
             }
 
             _log.Information("Requesting certificate {friendlyName}", friendlyNameIntermediate);

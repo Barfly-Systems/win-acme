@@ -15,5 +15,6 @@ namespace PKISharp.WACS.Services
         Task RevokeCertificate(Renewal renewal);
         void Encrypt();
         void Delete(Renewal renewal);
+        bool HasCachedKey(string cacheKey);
     }
 }
